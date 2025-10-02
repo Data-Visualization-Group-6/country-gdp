@@ -34,16 +34,16 @@ import plotly.graph_objects as go
 
 @dataclass
 class GDPVisualizerConfig:
-    csv_path: str = "gdp_2020_2025.csv"
+    csv_path: str = "Countries.csv"
     country_col_candidates: List[str] = None
     year_col_candidates: List[str] = None
     gdp_col_candidates: List[str] = None
-    year_min: int = 2020
-    year_max: int = 2025
+    year_min: int = 2000
+    year_max: int = 2022
 
     def __post_init__(self):
         if self.country_col_candidates is None:
-            self.country_col_candidates = ["Country", "Country Name", "country"]
+            self.country_col_candidates = ["Country Name"]
         if self.year_col_candidates is None:
             self.year_col_candidates = ["Year", "year"]
         if self.gdp_col_candidates is None:
@@ -54,7 +54,7 @@ class GDPApp:
     def __init__(self, cfg: GDPVisualizerConfig):
         self.cfg = cfg
         self.df_long = self._load_and_engineer()
-        self.countries = sorted(self.df_long["Country"].unique())
+        self.countries = sorted(self.df_long["Country Name"].unique())
         self.app = Dash(__name__)
         self._layout()
         self._callbacks()
@@ -64,13 +64,16 @@ class GDPApp:
         df = pd.read_csv(self.cfg.csv_path)
 
         # Detect columns
-        country_col = next((c for c in self.cfg.country_col_candidates if c in df.columns), None)
+        if "Country Name" in df.columns:
+            country_col = "Country Name"
+        else:
+            country_col = next((c for c in self.cfg.country_col_candidates if c in df.columns), None)
         year_col = next((c for c in self.cfg.year_col_candidates if c in df.columns), None)
         gdp_col = next((c for c in self.cfg.gdp_col_candidates if c in df.columns), None)
 
         if country_col and year_col and gdp_col:
             df_long = df[[country_col, year_col, gdp_col]].rename(
-                columns={country_col: "Country", year_col: "Year", gdp_col: "GDP"}
+                columns={country_col: "Country Name", year_col: "Year", gdp_col: "GDP"}
             )
         else:
             year_cols = []
@@ -82,7 +85,7 @@ class GDPApp:
                 except ValueError:
                     pass
             if not year_cols:
-                raise ValueError("Expected 2020–2025 year columns or (Country, Year, GDP) long format.")
+                raise ValueError("Expected 2000–2022 year columns or (Country, Year, GDP) long format.")
 
             if country_col is None:
                 non_year = [c for c in df.columns if c not in year_cols]
@@ -99,41 +102,45 @@ class GDPApp:
             df_long["Year"] = df_long["Year"].astype(str).str.extract(r"(\d{4})").astype(int)
 
         # Clean & bound
-        df_long["Country"] = df_long["Country"].astype(str)
+        df_long["Country Name"] = df_long["Country Name"].astype(str)
         df_long["Year"] = pd.to_numeric(df_long["Year"], errors="coerce")
         df_long["GDP"] = pd.to_numeric(df_long["GDP"], errors="coerce")
-        df_long = df_long.dropna(subset=["Country", "Year", "GDP"])
+        df_long = df_long.dropna(subset=["Country Name", "Year", "GDP"])
         df_long = df_long[(df_long["Year"] >= self.cfg.year_min) & (df_long["Year"] <= self.cfg.year_max)].copy()
-        df_long.sort_values(["Country", "Year"], inplace=True)
+        df_long.sort_values(["Country Name", "Year"], inplace=True)
 
         # YoY growth compared to previous year
-        df_long["YoY_%"] = df_long.groupby("Country")["GDP"].pct_change() * 100.0
+        df_long["YoY_%"] = df_long.groupby("Country Name")["GDP"].pct_change() * 100.0
 
         # show relativity to base year 2020
-        base = df_long.groupby("Country").apply(
+        base = df_long.groupby("Country Name").apply(
             lambda g: g[g["Year"] == g["Year"].min()]["GDP"].iloc[0] if not g.empty else np.nan
         ).replace({0: np.nan})
-        df_long["Index2020"] = df_long.apply(lambda r: 100.0 * r["GDP"] / base.get(r["Country"], np.nan), axis=1)
+        df_long["Index2000"] = df_long.apply(lambda r: 100.0 * r["GDP"] / base.get(r["Country Name"], np.nan), axis=1)
 
         # Country aggregates
-        g_first = df_long.sort_values("Year").groupby("Country").first()["GDP"]
-        g_last = df_long.sort_values("Year").groupby("Country").last()["GDP"]
-        y_first = df_long.sort_values("Year").groupby("Country").first()["Year"]
-        y_last = df_long.sort_values("Year").groupby("Country").last()["Year"]
+        g_first = df_long.sort_values("Year").groupby("Country Name").first()["GDP"]
+        g_last = df_long.sort_values("Year").groupby("Country Name").last()["GDP"]
+        y_first = df_long.sort_values("Year").groupby("Country Name").first()["Year"]
+        y_last = df_long.sort_values("Year").groupby("Country Name").last()["Year"]
         n_years = (y_last - y_first).replace(0, np.nan)
 
         cagr = (g_last / g_first).pow(1.0 / n_years) - 1.0
         cagr = cagr.replace([np.inf, -np.inf], np.nan)
 
-        vol = df_long.groupby("Country")["YoY_%"].std(ddof=0)
-        gdp_2025 = df_long[df_long["Year"] == 2025].set_index("Country")["GDP"]
-
-        df_country = pd.DataFrame({"CAGR_20_25": cagr, "Volatility_YoY": vol, "GDP_2025": gdp_2025})
-        df_long = df_long.merge(df_country, how="left", left_on="Country", right_index=True)
-
+        vol = df_long.groupby("Country Name")["YoY_%"].std(ddof=0)
+        gdp_2022 = (df_long[df_long["Year"] == 2022].groupby("Country Name")["GDP"].mean())
+       
+        #print("CAGR index duplicates:", cagr.index.duplicated().sum())
+        #print("Vol index duplicates:", vol.index.duplicated().sum())
+        #print("GDP_2022 index duplicates:", gdp_2022.index.duplicated().sum())
+        
+        df_country = pd.DataFrame({"CAGR_20_22": cagr, "Volatility_YoY": vol, "GDP_20_22": gdp_2022})
+        df_long = df_long.merge(df_country, how="left", left_on="Country Name", right_index=True)
+        
         # CAGR quartiles (4 groups)
         df_long["CAGR_quartile"] = pd.qcut(
-            df_long["CAGR_20_25"], q=4,
+            df_long["CAGR_20_22"], q=4,
             labels=["Q1 (Slowest)", "Q2", "Q3", "Q4 (Fastest)"],
             duplicates="drop",
         )
@@ -146,8 +153,8 @@ class GDPApp:
         self.app.layout = html.Div(
             style={"fontFamily": "system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial", "padding": "16px"},
             children=[
-                html.H2("GDP by Country (2020–2025)"),
-                html.P("Explore levels, growth, and 2025 growth vs size. Hover for insights; click legend items to isolate countries."),
+                html.H2("GDP by Country (2000–2022)"),
+                html.P("Explore levels, growth, and 2022 growth vs size. Hover for insights; click legend items to isolate countries."),
                 html.Div(
                     style={"display": "flex", "gap": "16px", "flexWrap": "wrap", "alignItems": "flex-end"},
                     children=[
@@ -173,7 +180,7 @@ class GDPApp:
                                     options=[
                                         {"label": "GDP Level", "value": "level"},
                                         {"label": "% YoY Growth", "value": "yoy"},
-                                        {"label": "Index (2020=100)", "value": "index"},
+                                        {"label": "Index (2000=100)", "value": "index"},
                                     ],
                                     value="level",
                                     inline=True,
@@ -186,7 +193,7 @@ class GDPApp:
                     id="tabs", value="tab-series", style={"marginTop": "12px"},
                     children=[
                         dcc.Tab(label="Time Series", value="tab-series"),
-                        dcc.Tab(label="Scatter: 2025 Size vs Growth", value="tab-scatter"),
+                        dcc.Tab(label="Scatter: 2022 Size vs Growth", value="tab-scatter"),
                     ],
                 ),
                 html.Div(id="tab-content", style={"marginTop": "12px"}),
@@ -207,7 +214,7 @@ class GDPApp:
 
             # ----- TIME SERIES ----- #
             if tab == "tab-series":
-                dff = df[df["Country"].isin(sel)] if sel else df.head(0)
+                dff = df[df["Country Name"].isin(sel)] if sel else df.head(0)
                 if dff.empty:
                     return html.Div("Select one or more countries to see the series.")
 
@@ -218,7 +225,7 @@ class GDPApp:
                 if metric_mode == "yoy":
                     y_col, title, y_title = "YoY_%", "% Year-over-Year GDP Growth", "% YoY"
                 elif metric_mode == "index":
-                    y_col, title, y_title = "Index2020", "Indexed GDP (2020 = 100)", "Index (2020=100)"
+                    y_col, title, y_title = "Index2000", "Indexed GDP (Base Year = 100)", "Index (Base Year=100)"
                 else:
                     y_col, title, y_title = "GDP_T", "GDP Level", "GDP (Trillions)"
 
@@ -226,11 +233,11 @@ class GDPApp:
                     dff,
                     x="Year",
                     y=y_col,
-                    color="Country",
+                    color="Country Name",
                     markers=True,
                     title=title,
                     # Only the fields we want in the tooltip, in a known order:
-                    custom_data=["GDP_T", "YoY_%", "Index2020", "CAGR_20_25"],
+                    custom_data=["Country Name", "GDP_T", "YoY_%", "Index2000", "CAGR_20_22"],
                     hover_data={},  # suppress extras
                 )
 
@@ -241,8 +248,8 @@ class GDPApp:
                     {y_title}: %{{y:.2f}}<br>
                     GDP (T): %{{customdata[0]:,.2f}}<br>
                     YoY%: %{{customdata[1]:.2f}}<br>
-                    Index2020: %{{customdata[2]:.1f}}<br>
-                    CAGR(’20→’25): %{{customdata[3]:.2%}}
+                    Index2000: %{{customdata[2]:.1f}}<br>
+                    CAGR(’00→’22): %{{customdata[3]:.2%}}
                     <extra></extra>
                     """
                 )
@@ -260,20 +267,21 @@ class GDPApp:
                 return dcc.Graph(figure=fig, style={"height": "520px"})
 
 
-            # ----- SCATTER (2025) ----- #
+            # ----- SCATTER (2022) ----- #
             if tab == "tab-scatter":
-                d2025 = df[df["Year"] == 2025].copy()
+                d2022 = df[df["Year"] == 2022].copy()
                 if not sel:
                     return html.Div("Select countries to populate this view.")
-                dff = d2025[d2025["Country"].isin(sel)].copy()
+                dff = d2022[d2022["Country Name"].isin(sel)].copy()
+                
 
-                # Bubble size ~ GDP_2025 (normalized for display)
-                dff["BubbleSize"] = dff["GDP_2025"]
+                # Bubble size ~ GDP_2022 (normalized for display)
+                dff["BubbleSize"] = dff["GDP_20_22"]
                 smin, smax = dff["BubbleSize"].min(), dff["BubbleSize"].max()
                 dff["BubbleSize"] = 20 + 60 * (dff["BubbleSize"] - smin) / (smax - smin) if pd.notna(smin) and pd.notna(smax) and smax > smin else 40
 
                 # Scale GDP to trillions for axis + hover
-                dff["GDP_2025_T"] = dff["GDP_2025"] / 1e6  # millions -> trillions
+                dff["GDP_2022_T"] = dff["GDP_20_22"] / 1e6  # millions -> trillions
 
                 quartiles = ["Q1 (Slowest)", "Q2", "Q3", "Q4 (Fastest)"]
                 color_map = {
@@ -285,31 +293,31 @@ class GDPApp:
 
                 fig = px.scatter(
                     dff,
-                    x="GDP_2025_T", y="YoY_%",
+                    x="GDP_2022_T", y="YoY_%",
                     size="BubbleSize",
                     color="CAGR_quartile",
                     category_orders={"CAGR_quartile": quartiles},
                     color_discrete_map=color_map,
-                    title="2025: GDP Size vs % YoY Growth",
-                    labels={"CAGR_quartile": "CAGR Quartile (’20→’25)"},
-                    custom_data=["Country", "GDP_2025_T", "YoY_%", "CAGR_20_25", "CAGR_quartile"],
+                    title="2022: GDP Size vs % YoY Growth",
+                    labels={"CAGR_quartile": "CAGR Quartile (’20→’22)"},
+                    custom_data=["Country Name", "GDP_2022_T", "YoY_%", "CAGR_20_22", "CAGR_quartile"],
                     hover_data={},  # clean tooltip
                 )
 
                 fig.update_traces(
                     hovertemplate=(
                         "<b>%{customdata[0]}</b><br>"
-                        "2025 GDP: %{customdata[1]:.2f}T<br>"
-                        "2025 YoY: %{customdata[2]:.2f}%<br>"
-                        "CAGR(’20→’25): %{customdata[3]:.2%}<br>"
+                        "2022 GDP: %{customdata[1]:.2f}T<br>"
+                        "2022 YoY: %{customdata[2]:.2f}%<br>"
+                        "CAGR(’00→’22): %{customdata[3]:.2%}<br>"
                         "Quartile: %{customdata[4]}"
                         "<extra></extra>"
                     )
                 )
 
                 fig.update_layout(
-                    xaxis_title="2025 GDP (Trillions)",
-                    yaxis_title="% YoY in 2025",
+                    xaxis_title="2022 GDP (Trillions)",
+                    yaxis_title="% YoY in 2022",
                     legend_title_text="CAGR Quartile",
                 )
                 fig.update_xaxes(tickformat=".0f", ticksuffix="T")
@@ -336,5 +344,5 @@ class GDPApp:
 
 
 if __name__ == "__main__":
-    cfg = GDPVisualizerConfig(csv_path="gdp_2020_2025.csv")
+    cfg = GDPVisualizerConfig(csv_path="Countries.csv")
     GDPApp(cfg).run()
