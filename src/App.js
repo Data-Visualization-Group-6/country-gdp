@@ -8,7 +8,7 @@ const TOP_N_PER_CONTINENT = 9;
 
 const continentColors = {
   Africa: "#FF6B6B",
-  Asia: "#4ECDC4",
+  Asia: "#008000",
   Europe: "#45B7D1",
   "North America": "#FFA07A",
   "South America": "#98D8C8",
@@ -186,6 +186,15 @@ const VoronoiTreemap = () => {
     const { w, h } = dims;
     const svg = svgEl.attr("viewBox", `0 0 ${w} ${h}`);
 
+    function seededRandom(seed) {
+      let s = seed;
+      return function() {
+        s = Math.sin(s) * 10000;
+        return s - Math.floor(s);
+      };
+    }
+
+    
     // Build hierarchy and compute polygons
     const root = d3
       .hierarchy(hierarchyData)
@@ -201,7 +210,8 @@ const VoronoiTreemap = () => {
       ])
       .convergenceRatio(0.015)
       .maxIterationCount(80)
-      .minWeightRatio(0.002);
+      .minWeightRatio(0.002)
+      .prng(seededRandom(12345));
 
     vt(root);
 
@@ -281,7 +291,7 @@ const VoronoiTreemap = () => {
         }
       }
     });
-  }, [hierarchyData, dims, displayMode]);
+  }, [hierarchyData, dims, displayMode, selectedYear]);
 
   return (
     <div className="w-full min-h-screen bg-white">
