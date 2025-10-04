@@ -54,10 +54,18 @@ function calcMakeup(record) {
   return { ...comp, Other: other };
 }
 
-function buildHierarchy(rows, year) {
-  const yearRows = rows.filter(
+function buildHierarchy(rows, year, selectedCountries, selectedContinents) {
+  let yearRows = rows.filter(
     (r) => Number(r.Year) === Number(year) && r["Country Name"] && Number(r.GDP) > 0
   );
+
+  // Filter by selected countries and continents
+  if (selectedCountries.size > 0) {
+    yearRows = yearRows.filter(r => selectedCountries.has(r["Country Name"]));
+  }
+  if (selectedContinents.size > 0) {
+    yearRows = yearRows.filter(r => selectedContinents.has(r["Continent Name"]));
+  }
 
   // limit to TOP_N per continent + Others (adjust TOP_N_PER_CONTINENT to taste)
   const byCont = d3.group(yearRows, (d) => d["Continent Name"] || "Unknown");
@@ -122,6 +130,8 @@ const VoronoiTreemap = () => {
   const [yearBounds, setYearBounds] = useState([2000, 2022]);
   const [selectedYear, setSelectedYear] = useState(2000);
   const [displayMode, setDisplayMode] = useState("name"); // 'name' or 'makeup'
+  const [selectedCountries, setSelectedCountries] = useState(new Set());
+  const [selectedContinents, setSelectedContinents] = useState(new Set());
 
   const wrapperRef = useRef(null);
   const svgRef = useRef(null);
@@ -162,6 +172,9 @@ const VoronoiTreemap = () => {
           setYearBounds([min, max]);
           setSelectedYear(min);
         }
+        // Reset selections when new data is loaded
+        setSelectedCountries(new Set());
+        setSelectedContinents(new Set());
         setProcessing(false);
       },
       error: (err) => {
@@ -172,10 +185,23 @@ const VoronoiTreemap = () => {
     });
   };
 
+  // Get available countries and continents from data
+  const availableCountries = useMemo(() => {
+    if (!rows.length) return [];
+    const countries = [...new Set(rows.map(r => r["Country Name"]).filter(Boolean))];
+    return countries.sort();
+  }, [rows]);
+
+  const availableContinents = useMemo(() => {
+    if (!rows.length) return [];
+    const continents = [...new Set(rows.map(r => r["Continent Name"]).filter(Boolean))];
+    return continents.sort();
+  }, [rows]);
+
   const hierarchyData = useMemo(() => {
     if (!rows.length) return null;
-    return buildHierarchy(rows, selectedYear);
-  }, [rows, selectedYear]);
+    return buildHierarchy(rows, selectedYear, selectedCountries, selectedContinents);
+  }, [rows, selectedYear, selectedCountries, selectedContinents]);
 
   // Render Voronoi treemap
   useEffect(() => {
@@ -300,7 +326,7 @@ const VoronoiTreemap = () => {
 
         {/* Controls */}
         <div className="bg-gray-100 rounded-lg p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             {/* File Upload */}
             <div>
               <label className="block text-sm font-medium mb-2">Upload CSV File</label>
@@ -346,6 +372,95 @@ const VoronoiTreemap = () => {
               </select>
             </div>
           </div>
+
+          {/* Country and Continent Selection */}
+          {rows.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Country Selection */}
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Countries ({selectedCountries.size} selected)
+                </label>
+                <div className="max-h-40 overflow-y-auto border rounded bg-white">
+                  {availableCountries.map(country => (
+                    <label key={country} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedCountries.has(country)}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedCountries);
+                          if (e.target.checked) {
+                            newSelected.add(country);
+                          } else {
+                            newSelected.delete(country);
+                          }
+                          setSelectedCountries(newSelected);
+                        }}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">{country}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setSelectedCountries(new Set(availableCountries))}
+                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setSelectedCountries(new Set())}
+                    className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+
+              {/* Continent Selection */}
+              <div>
+                <label className="block text-sm font-medium mb-2">
+                  Continents ({selectedContinents.size} selected)
+                </label>
+                <div className="max-h-40 overflow-y-auto border rounded bg-white">
+                  {availableContinents.map(continent => (
+                    <label key={continent} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedContinents.has(continent)}
+                        onChange={(e) => {
+                          const newSelected = new Set(selectedContinents);
+                          if (e.target.checked) {
+                            newSelected.add(continent);
+                          } else {
+                            newSelected.delete(continent);
+                          }
+                          setSelectedContinents(newSelected);
+                        }}
+                        className="mr-2"
+                      />
+                      <span className="text-sm">{continent}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => setSelectedContinents(new Set(availableContinents))}
+                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                  >
+                    Select All
+                  </button>
+                  <button
+                    onClick={() => setSelectedContinents(new Set())}
+                    className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Legend */}
