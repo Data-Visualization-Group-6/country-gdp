@@ -132,6 +132,7 @@ const VoronoiTreemap = () => {
   const [displayMode, setDisplayMode] = useState("name"); // 'name' or 'makeup'
   const [selectedCountries, setSelectedCountries] = useState(new Set());
   const [selectedContinents, setSelectedContinents] = useState(new Set());
+  const [expandedContinents, setExpandedContinents] = useState(new Set());
 
   const wrapperRef = useRef(null);
   const svgRef = useRef(null);
@@ -175,6 +176,7 @@ const VoronoiTreemap = () => {
         // Reset selections when new data is loaded
         setSelectedCountries(new Set());
         setSelectedContinents(new Set());
+        setExpandedContinents(new Set());
         setProcessing(false);
       },
       error: (err) => {
@@ -185,18 +187,31 @@ const VoronoiTreemap = () => {
     });
   };
 
-  // Get available countries and continents from data
-  const availableCountries = useMemo(() => {
-    if (!rows.length) return [];
-    const countries = [...new Set(rows.map(r => r["Country Name"]).filter(Boolean))];
-    return countries.sort();
+  // Get hierarchical structure of continents and their countries
+  const continentCountryMap = useMemo(() => {
+    if (!rows.length) return {};
+    const map = {};
+    rows.forEach(row => {
+      const continent = row["Continent Name"];
+      const country = row["Country Name"];
+      if (continent && country) {
+        if (!map[continent]) {
+          map[continent] = new Set();
+        }
+        map[continent].add(country);
+      }
+    });
+    // Convert Sets to sorted arrays
+    const sortedMap = {};
+    Object.keys(map).sort().forEach(continent => {
+      sortedMap[continent] = [...map[continent]].sort();
+    });
+    return sortedMap;
   }, [rows]);
 
   const availableContinents = useMemo(() => {
-    if (!rows.length) return [];
-    const continents = [...new Set(rows.map(r => r["Continent Name"]).filter(Boolean))];
-    return continents.sort();
-  }, [rows]);
+    return Object.keys(continentCountryMap).sort();
+  }, [continentCountryMap]);
 
   const hierarchyData = useMemo(() => {
     if (!rows.length) return null;
@@ -373,91 +388,123 @@ const VoronoiTreemap = () => {
             </div>
           </div>
 
-          {/* Country and Continent Selection */}
+          {/* Hierarchical Country and Continent Selection */}
           {rows.length > 0 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Country Selection */}
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Countries ({selectedCountries.size} selected)
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-sm font-medium">
+                  Countries & Continents ({selectedCountries.size} countries, {selectedContinents.size} continents selected)
                 </label>
-                <div className="max-h-40 overflow-y-auto border rounded bg-white">
-                  {availableCountries.map(country => (
-                    <label key={country} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedCountries.has(country)}
-                        onChange={(e) => {
-                          const newSelected = new Set(selectedCountries);
-                          if (e.target.checked) {
-                            newSelected.add(country);
-                          } else {
-                            newSelected.delete(country);
-                          }
-                          setSelectedCountries(newSelected);
-                        }}
-                        className="mr-2"
-                      />
-                      <span className="text-sm">{country}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-2 flex gap-2">
+                <div className="flex gap-2">
                   <button
-                    onClick={() => setSelectedCountries(new Set(availableCountries))}
-                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
+                    onClick={() => {
+                      const allCountries = Object.values(continentCountryMap).flat();
+                      setSelectedCountries(new Set(allCountries));
+                      setSelectedContinents(new Set(availableContinents));
+                    }}
+                    className="text-xs bg-blue-500 text-white px-3 py-1 rounded hover:bg-blue-600"
                   >
                     Select All
                   </button>
                   <button
-                    onClick={() => setSelectedCountries(new Set())}
-                    className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
+                    onClick={() => {
+                      setSelectedCountries(new Set());
+                      setSelectedContinents(new Set());
+                    }}
+                    className="text-xs bg-gray-500 text-white px-3 py-1 rounded hover:bg-gray-600"
                   >
                     Clear All
                   </button>
                 </div>
               </div>
-
-              {/* Continent Selection */}
-              <div>
-                <label className="block text-sm font-medium mb-2">
-                  Continents ({selectedContinents.size} selected)
-                </label>
-                <div className="max-h-40 overflow-y-auto border rounded bg-white">
-                  {availableContinents.map(continent => (
-                    <label key={continent} className="flex items-center p-2 hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={selectedContinents.has(continent)}
-                        onChange={(e) => {
-                          const newSelected = new Set(selectedContinents);
-                          if (e.target.checked) {
-                            newSelected.add(continent);
-                          } else {
-                            newSelected.delete(continent);
-                          }
-                          setSelectedContinents(newSelected);
-                        }}
-                        className="mr-2"
-                      />
-                      <span className="text-sm">{continent}</span>
-                    </label>
-                  ))}
-                </div>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => setSelectedContinents(new Set(availableContinents))}
-                    className="text-xs bg-blue-500 text-white px-2 py-1 rounded hover:bg-blue-600"
-                  >
-                    Select All
-                  </button>
-                  <button
-                    onClick={() => setSelectedContinents(new Set())}
-                    className="text-xs bg-gray-500 text-white px-2 py-1 rounded hover:bg-gray-600"
-                  >
-                    Clear All
-                  </button>
-                </div>
+              
+              <div className="max-h-60 overflow-y-auto border rounded bg-white">
+                {availableContinents.map(continent => {
+                  const countries = continentCountryMap[continent] || [];
+                  const isExpanded = expandedContinents.has(continent);
+                  const continentSelected = selectedContinents.has(continent);
+                  const selectedCountriesInContinent = countries.filter(country => selectedCountries.has(country));
+                  const allCountriesInContinentSelected = countries.length > 0 && selectedCountriesInContinent.length === countries.length;
+                  
+                  return (
+                    <div key={continent} className="border-b border-gray-100 last:border-b-0">
+                      {/* Continent Header */}
+                      <div className="flex items-center p-3 bg-gray-50 hover:bg-gray-100">
+                        <button
+                          onClick={() => {
+                            const newExpanded = new Set(expandedContinents);
+                            if (isExpanded) {
+                              newExpanded.delete(continent);
+                            } else {
+                              newExpanded.add(continent);
+                            }
+                            setExpandedContinents(newExpanded);
+                          }}
+                          className="mr-2 text-gray-600 hover:text-gray-800"
+                        >
+                          {isExpanded ? '▼' : '▶'}
+                        </button>
+                        <input
+                          type="checkbox"
+                          checked={continentSelected}
+                          onChange={(e) => {
+                            const newSelectedContinents = new Set(selectedContinents);
+                            const newSelectedCountries = new Set(selectedCountries);
+                            
+                            if (e.target.checked) {
+                              newSelectedContinents.add(continent);
+                              // Select all countries in this continent
+                              countries.forEach(country => newSelectedCountries.add(country));
+                            } else {
+                              newSelectedContinents.delete(continent);
+                              // Deselect all countries in this continent
+                              countries.forEach(country => newSelectedCountries.delete(country));
+                            }
+                            
+                            setSelectedContinents(newSelectedContinents);
+                            setSelectedCountries(newSelectedCountries);
+                          }}
+                          className="mr-3"
+                        />
+                        <span className="font-medium text-sm flex-1">{continent}</span>
+                        <span className="text-xs text-gray-500">
+                          {selectedCountriesInContinent.length}/{countries.length} countries
+                        </span>
+                      </div>
+                      
+                      {/* Countries List */}
+                      {isExpanded && (
+                        <div className="bg-white">
+                          {countries.map(country => (
+                            <label key={country} className="flex items-center p-2 pl-8 hover:bg-gray-50 cursor-pointer border-l-2 border-gray-100">
+                              <input
+                                type="checkbox"
+                                checked={selectedCountries.has(country)}
+                                onChange={(e) => {
+                                  const newSelectedCountries = new Set(selectedCountries);
+                                  const newSelectedContinents = new Set(selectedContinents);
+                                  
+                                  if (e.target.checked) {
+                                    newSelectedCountries.add(country);
+                                  } else {
+                                    newSelectedCountries.delete(country);
+                                    // If deselecting a country, also deselect the continent
+                                    newSelectedContinents.delete(continent);
+                                  }
+                                  
+                                  setSelectedCountries(newSelectedCountries);
+                                  setSelectedContinents(newSelectedContinents);
+                                }}
+                                className="mr-3"
+                              />
+                              <span className="text-sm">{country}</span>
+                            </label>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
