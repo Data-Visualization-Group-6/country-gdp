@@ -53,11 +53,22 @@ function calcMakeup(record) {
   const other = Math.max(0, 100 - total);
   return { ...comp, Other: other };
 }
+function numberConversion(number){
+  if (number >= 1000000 && number <= 999999999){
+    return (number/1000000).toFixed(2) + "M";
+  }else if (number >= 1000000000 && number <= 999999999999){
+    return (number/1000000000).toFixed(1) + "B";
+  }else if (number >= 1000000000000 && number <= 999999999999999){
+    return (number/1000000000000).toFixed(2) + "T";
+  
+} 
+}
 
 function buildHierarchy(rows, year) {
   const yearRows = rows.filter(
     (r) => Number(r.Year) === Number(year) && r["Country Name"] && Number(r.GDP) > 0
   );
+  
 
   // limit to TOP_N per continent + Others (adjust TOP_N_PER_CONTINENT to taste)
   const byCont = d3.group(yearRows, (d) => d["Continent Name"] || "Unknown");
@@ -88,8 +99,16 @@ function buildHierarchy(rows, year) {
     const country = {
       name: r["Country Name"],
       continent: r["Continent Name"] || "Unknown",
-      unemployment: Number(r.Unemployment),
-      inflation: Number(r["Inflation Rate"]),
+      unemployment: Number(r.Unemployment).toFixed(0),
+      inflation: Number(r["Inflation Rate"]).toFixed(1),
+      service: Number(r["Service (% GDP)"]).toFixed(1),
+      import: Number(r["Import (% GDP)"]).toFixed(1),
+      export: Number(r["Export (% GDP)"]).toFixed(1),
+      agriculture: Number(r["Agriculture (% GDP)"]).toFixed(1),
+      industry: Number(r["Industry (% GDP)"]).toFixed(1),
+      gpdpercapita: Number(r["GDP Per Capita"]).toFixed(2),
+      education:Number(r["Education Expenditure"]).toFixed(0),
+      health: Number(r["Health Expenditure"]).toFixed(0)
       // If we have makeup fields, add children; else make leaf with value = GDP
     };
 
@@ -122,15 +141,12 @@ const VoronoiTreemap = () => {
   const [yearBounds, setYearBounds] = useState([2000, 2022]);
   const [selectedYear, setSelectedYear] = useState(2000);
   const [displayMode, setDisplayMode] = useState("name"); // 'name' or 'makeup'
+  //const [toolTip,setToolTip] = useState(null) //state used to keep track of tooltip instance
 
   const wrapperRef = useRef(null);
   const svgRef = useRef(null);
   const [dims, setDims] = useState({ w: 1000, h: 700 });
-
-  console.log("continentColors entries:", Object.entries(continentColors));
-  console.log("gdpComponentColors entries:", Object.entries(gdpComponentColors));
-  console.log("displayMode:", displayMode);
-
+  const toolTipRef = useRef(null); // ref for toolTip object
 
   // Resize observer for responsive SVG
   useEffect(() => {
@@ -138,47 +154,26 @@ const VoronoiTreemap = () => {
       const w = Math.max(640, Math.floor(entries[0].contentRect.width));
       setDims({ w, h: Math.max(500, Math.round(w * 0.62)) });
     });
+
+    //tooltip creation when page is first rendered
+    toolTipRef.current = d3.select("body")
+      .append("div")
+      .attr("class","tooltip")
+      .style("position", "absolute")
+      .style("opacity",0)
+      .style("pointer-events","none")
+      .style("background","rgba(0,0,0,0.8)")
+      .style("color", "#fff")
+      .style("padding", "6px 10px")
+      .style("border-radius", "4px")
+      .style("font-size", "12px"); 
+      
+
     if (wrapperRef.current) ro.observe(wrapperRef.current);
     return () => ro.disconnect();
+
+
   }, []);
-
-  useEffect(() => {
-  async function loadCSV() {
-    setProcessing(true);
-    Papa.parse("countries2.csv", {
-      download: true,
-      header: true,
-      dynamicTyping: true,
-      skipEmptyLines: true,
-      complete: ({ data }) => {
-        const coerced = data.map((r) => ({
-          ...r,
-          Year: Number(r.Year),
-          GDP: Number(r.GDP),
-          Unemployment: r.Unemployment !== "" ? Number(r.Unemployment) : null,
-          "Inflation Rate": r["Inflation Rate"] !== "" ? Number(r["Inflation Rate"]) : null,
-        }));
-        setRows(coerced);
-
-        const years = coerced.map((r) => r.Year).filter((y) => !isNaN(y));
-        if (years.length) {
-          const min = Math.min(...years);
-          const max = Math.max(...years);
-          setYearBounds([min, max]);
-          setSelectedYear(min);
-        }
-        setProcessing(false);
-      },
-      error: (err) => {
-        console.error("CSV load error:", err);
-        setProcessing(false);
-      },
-    });
-  }
-
-  loadCSV();
-  }, []); // runs once on mount
-
 
   // Parse CSV via Papa
   const onFile = async (e) => {
@@ -219,6 +214,7 @@ const VoronoiTreemap = () => {
     if (!rows.length) return null;
     return buildHierarchy(rows, selectedYear);
   }, [rows, selectedYear]);
+
 
   // Render Voronoi treemap
   useEffect(() => {
@@ -262,6 +258,8 @@ const VoronoiTreemap = () => {
     const countries = root.children || [];
     const gCountries = svg.append("g").attr("class", "countries");
 
+
+    //
     countries.forEach((node) => {
       const country = node.data;
       const polygon = node.polygon;
@@ -273,6 +271,9 @@ const VoronoiTreemap = () => {
       const centroid = d3.polygonCentroid(polygon);
 
       const g = gCountries.append("g").attr("class", "country");
+      
+      
+     
 
       // Fill:
       if (displayMode === "name" || !(node.children && node.children.length)) {
@@ -281,7 +282,29 @@ const VoronoiTreemap = () => {
           .attr("fill", continentColors[country.continent] || "#ccc")
           .attr("opacity", opacity)
           .attr("stroke", borderColor)
-          .attr("stroke-width", 2);
+          .attr("stroke-width", 2)
+
+          //checks if user hovers over a node in tree map if so display tool tip that was referebced in the toolTipRef along with various data
+          .on("mouseover", (event)=>{ toolTipRef.current.html(`<strong>${node.data.name}</strong><br/>
+                                                    GDP: $${numberConversion(node.value).toLocaleString()}<br/>
+                                                    GDP Per Capita: $${node.data.gpdpercapita ?? "N/A"}<br/>
+                                                    Agriculture(% GDP): ${node.data.agriculture ?? "N/A"}%<br/>
+                                                    Service(% GDP): ${node.data.service?? "N/A"}%<br/>
+                                                    Industry(% GDP): ${node.data.industry?? "N/A"}%<br/>
+                                                    Inflation Rate: ${node.data.inflation ?? "N/A"}%<br/>
+                                                    Unemployment Rate: ${node.data.unemployment ?? "N/A"}%<br/>`)
+           
+          .style("opacity",1);   //make the tooltip visible                                       
+          })
+          .on("mousemove", (event)=>{ toolTipRef.current                               // moves tooltip with mouse so mouse doesnt obstruct it
+                                      .style("left",event.pageX + 10 +"px")
+                                      .style("top", event.pageY + 10 + "px");                                       
+          })
+          //once user stops hovering over node, make tool tip disappear
+          .on("mouseleave", ()=>{
+            toolTipRef.current.style("opacity", 0);
+          });
+
       } else {
         // Sub-cells: depth === 2 (components)
         // Draw components first, then a thin outline for the country
@@ -294,6 +317,7 @@ const VoronoiTreemap = () => {
             .attr("opacity", opacity)
             .attr("stroke", "rgba(0,0,0,0.05)")
             .attr("stroke-width", 1);
+            
         });
 
         // Country outline on top
@@ -336,9 +360,10 @@ const VoronoiTreemap = () => {
     });
   }, [hierarchyData, dims, displayMode, selectedYear]);
 
-  
   return (
+
     <div className="w-full min-h-screen bg-white">
+      <div className ="body">
       <div className="max-w-7xl mx-auto p-6">
         <h1 className="text-3xl font-bold mb-6 text-center">GDP Voronoi Treemap Visualization</h1>
 
@@ -392,67 +417,31 @@ const VoronoiTreemap = () => {
           </div>
         </div>
 
-        
-        
-
-        {/* LEGEND */}
-        <div className="bg-gray-100 rounded-lg p-4 mb-6 w-full">
-          <h3 className="font-bold mb-3 text-gray-800">Legend</h3>
-
-          <div className="flex flex-wrap gap-4">
+        {/* Legend */}
+        <div className="bg-gray-100 rounded-lg p-4 mb-6">
+          <h3 className="font-bold mb-3">Legend</h3>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div><strong>Size:</strong> GDP (area)</div>
+            <div><strong>Opacity:</strong> Employment rate</div>
+            <div><strong>Border:</strong> Inflation (Green=+, Red=-, White=NULL)</div>
+            <div><strong>Color:</strong> {displayMode === "name" ? "Continent" : "GDP Components"}</div>
+          </div>
+          <div className="flex flex-wrap gap-3 mt-3 text-sm">
             {displayMode === "name"
-              ? Object.entries(continentColors).map(([label, color]) => (
-                  <div
-                    key={label}
-                    className="flex items-center gap-2 bg-white px-2 py-1 rounded border border-gray-200"
-                  >
-                    {/* Colored box */}
-                    <span
-                      className="w-5 h-5 inline-block rounded border border-gray-400 flex-shrink-0"
-                      style={{ backgroundColor: color }}
-                    ></span>
-                    <span
-                      style={{
-                        width: "24px",
-                        height: "24px",
-                        backgroundColor: color,
-                        border: "1px solid #666",
-                        flexShrink: 0,
-                        display: "inline-block",
-                      }}
-                    ></span>
-                    {/* Label text */}
-                    <span className="font-medium text-gray-800">{label}</span>
+              ? Object.entries(continentColors).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="inline-block w-4 h-4 rounded" style={{ background: v }} />
+                    {k}
                   </div>
                 ))
-              : Object.entries(gdpComponentColors).map(([label, color]) => (
-                  <div
-                    key={label}
-                    className="flex items-center gap-2 bg-white px-2 py-1 rounded border border-gray-200"
-                  >
-                    {/* Colored box */}
-                    <span
-                      className="w-5 h-5 inline-block rounded border border-gray-400 flex-shrink-0"
-                      style={{ backgroundColor: color }}
-                    ></span>
-                    <span
-                      style={{
-                        width: "24px",
-                        height: "24px",
-                        backgroundColor: color,
-                        border: "1px solid #666",
-                        flexShrink: 0,
-                        display: "inline-block",
-                      }}
-                    ></span>
-                    {/* Label text */}
-                    <span className="font-medium text-gray-800">{label}</span>
+              : Object.entries(gdpComponentColors).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="inline-block w-4 h-4 rounded" style={{ background: v }} />
+                    {k}
                   </div>
                 ))}
           </div>
         </div>
-
-
 
         {/* Chart */}
         <div ref={wrapperRef} className="w-full bg-white rounded-lg shadow-sm ring-1 ring-gray-200">
@@ -468,6 +457,7 @@ const VoronoiTreemap = () => {
         {processing && (
           <div className="text-center py-6 text-gray-600">Processing data…</div>
         )}
+      </div>
       </div>
     </div>
   );
